@@ -293,7 +293,7 @@ async function secondTick(){
       watt: solarWatt,
       sunAlt: altDeg,
       cloud: cloud
-    });
+    });ap
     if(history.length > 48) history.shift(); // simpan 2 hari
     localStorage.setItem('history', JSON.stringify(history));
     updateHistoryTable();
