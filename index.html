@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Solar Monitor - Pekutatan, Jembrana</title>
+
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+<!-- SunCalc untuk posisi matahari -->
+<script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.min.js"></script>
+
+<style>
+  body { font-family:'Poppins',sans-serif; background: linear-gradient(135deg,#0f172a,#1e293b); color:#fff; }
+  .text-solar-green { color:#34d399; }
+  .card-bg { background-color:#1e293b; }
+  .charge-yes { color:#34d399; }
+  .charge-no { color:#ef4444; }
+  .stat { background:#374151; }
+</style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+  <div class="container bg-card-bg shadow-lg rounded-xl p-6 md:p-8 max-w-3xl w-full">
+    <h1 class="text-3xl md:text-4xl font-bold mb-4 text-solar-green text-center">Mini Solar Monitor</h1>
+    <p class="text-center text-gray-300 mb-6" id="clock">--:--:--</p>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Battery Level</p>
+        <p class="text-3xl font-semibold text-blue-400"><span id="bat">--</span> %</p>
+      </div>
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Voltage (Daya Diperoleh Panel)</p>
+        <p class="text-3xl font-semibold text-yellow-400"><span id="volt">--</span> V</p>
+      </div>
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Ampere (Rata Rata)</p>
+        <p class="text-3xl font-semibold text-red-400"><span id="amp">--</span> A</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Suhu</p>
+        <p class="text-3xl font-semibold"><span id="temp">--</span> °C</p>
+      </div>
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Kelembapan</p>
+        <p class="text-3xl font-semibold"><span id="hum">--</span> %</p>
+      </div>
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Cloud Cover</p>
+        <p class="text-3xl font-semibold"><span id="cloud">--</span> %</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Sun Altitude</p>
+        <p class="text-2xl font-semibold"><span id="sunAlt">--</span> °</p>
+      </div>
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Sun Azimuth</p>
+        <p class="text-2xl font-semibold"><span id="sunAzi">--</span> °</p>
+      </div>
+      <div class="stat p-4 rounded-lg shadow-md text-center">
+        <p class="text-sm text-gray-400">Sun Factor</p>
+        <p class="text-2xl font-semibold"><span id="sunFac">--</span></p>
+      </div>
+    </div>
+
+    <h2 class="text-2xl font-semibold mb-3 text-left text-solar-green">History per Jam</h2>
+    <div class="overflow-x-auto mb-6">
+      <table id="hist" class="min-w-full bg-gray-800 rounded-lg overflow-hidden">
+        <thead>
+          <tr class="bg-gray-700 text-gray-200 uppercase text-sm">
+            <th class="py-3 px-4 text-left">Jam</th>
+            <th class="py-3 px-4 text-left">Battery %</th>
+            <th class="py-3 px-4 text-left">Watt</th>
+            <th class="py-3 px-4 text-left">Sun Alt (°)</th>
+            <th class="py-3 px-4 text-left">Cloud (%)</th>
+          </tr>
+        </thead>
+        <tbody class="text-gray-300 text-sm font-light"></tbody>
+      </table>
+    </div>
+
+    <h2 class="text-2xl font-semibold mb-3 text-left text-solar-green">Energi Tercatat</h2>
+    <div class="bg-gray-700 p-4 rounded-lg shadow-md" style="height:260px">
+      <canvas id="whChart"></canvas>
+    </div>
+  </div>
+
+<script>
+/* -------------------- Konstanta & Config -------------------- */
+const LAT = -8.419745;        // Pekutatan (koordinat yang kamu pakai)
+const LON = 114.827927;
+const API_URL =
+  "https://api.open-meteo.com/v1/forecast?latitude=-8.419745&longitude=114.827927&hourly=temperature_2m,relative_humidity_2m,cloudcover_mid&timezone=auto";
+
+const PANEL_WP = 200;         // 2 x 100 Wp
+const MPPT_EFF = 0.97;
+const BATTERY_CAPACITY_WH = 12 * 45; // 540 Wh (12V * 45Ah)
+const CHARGE_START_H = 6.75;  // 06:45
+const CHARGE_END_H   = 18.30; // 18:18
+const NIGHT_LOAD_W   = 18;    // 1.5A @ 12V
+const CLOUD_LOSS     = 0.75;  // 0.0–1.0 (berapa besar awan mengurangi radiasi)
+
+/* -------------------- State -------------------- */
+let weather = null;
+let lastWeatherAt = 0;
+
+let batteryPct = parseFloat(localStorage.getItem('batteryPct')) || 0;
+let history = JSON.parse(localStorage.getItem('history')) || [];
+let lastHourLogged = (history.length ? history[history.length-1].h : -1);
+
+let whChart;
+
+/* -------------------- Chart Init -------------------- */
+function initializeChart(){
+  const ctx = document.getElementById('whChart').getContext('2d');
+  whChart = new Chart(ctx,{
+    type:'line',
+    data:{
+      labels: history.map(i => (i.h<10?'0':'')+i.h+":00"),
+      datasets:[{
+        label:'Battery %',
+        data: history.map(i => i.battery),
+        backgroundColor:'rgba(52,211,153,0.2)',
+        borderColor:'#34d399',
+        borderWidth:2,
+        fill:true,
+        tension:0.35,
+        pointRadius:2
+      }]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      scales:{ y:{ min:0, max:100 } },
+      plugins:{ legend:{ labels:{ color:'#e5e7eb' } } }
+    }
+  });
+}
+
+/* -------------------- Helpers -------------------- */
+function fmt(n, d=1){ return (isFinite(n)? n.toFixed(d):'--'); }
+
+function sunParams(now){
+  // SunCalc altitude/azimuth dalam radian
+  const pos = SunCalc.getPosition(now, LAT, LON);
+  const altDeg = pos.altitude * 180/Math.PI;  // ketinggian matahari
+  const aziDeg = pos.azimuth  * 180/Math.PI;  // azimuth (−180..+180)
+  const sunFactor = Math.max(0, Math.sin(pos.altitude)); // 0..1
+  return { altDeg, aziDeg, sunFactor };
+}
+
+function hourFloat(date){
+  return date.getHours() + date.getMinutes()/60 + date.getSeconds()/3600;
+}
+
+/* -------------------- Weather Fetch -------------------- */
+async function fetchWeather(){
+  try{
+    const res = await fetch(API_URL);
+    const data = await res.json();
+    weather = data.hourly;
+    lastWeatherAt = Date.now();
+  }catch(e){
+    console.error("Weather fetch error:", e);
+  }
+}
+
+/* -------------------- UI Render -------------------- */
+function renderTopStats({temp, hum, cloud, volt, amp, sunAlt, sunAzi, sunFac}){
+  document.getElementById('temp').innerText  = fmt(temp,1);
+  document.getElementById('hum').innerText   = fmt(hum,0);
+  document.getElementById('cloud').innerText = fmt(cloud,0);
+  document.getElementById('bat').innerText   = fmt(batteryPct,0);
+  document.getElementById('volt').innerText  = fmt(volt,2);
+  document.getElementById('amp').innerText   = fmt(amp,2);
+  document.getElementById('sunAlt').innerText= fmt(sunAlt,1);
+  document.getElementById('sunAzi').innerText= fmt(sunAzi,1);
+  document.getElementById('sunFac').innerText= fmt(sunFac,2);
+}
+
+function renderClock(now){
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const ss = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clock').innerText = `${hh}:${mm}:${ss}`;
+}
+
+function updateHistoryTable(){
+  const tbody = document.querySelector('#hist tbody');
+  tbody.innerHTML = '';
+  history.forEach(item=>{
+    const tr = tbody.insertRow();
+    tr.insertCell().innerText = (item.h<10?'0':'')+item.h + ':00';
+    tr.insertCell().innerText = fmt(item.battery,1);
+    tr.insertCell().innerText = fmt(item.watt,1);
+    tr.insertCell().innerText = fmt(item.sunAlt,1);
+    tr.insertCell().innerText = fmt(item.cloud,0);
+  });
+}
+
+function updateChart(){
+  if(!whChart) return;
+  whChart.data.labels = history.map(i => (i.h<10?'0':'')+i.h+":00");
+  whChart.data.datasets[0].data = history.map(i => i.battery);
+  whChart.update();
+}
+
+/* -------------------- Core Tick (1 detik) -------------------- */
+async function secondTick(){
+  const now = new Date();
+  renderClock(now);
+
+  // Refresh weather tiap 5 detik
+  if(!weather || (Date.now()-lastWeatherAt) > 5000){
+    await fetchWeather();
+  }
+  if(!weather) return;
+
+  const hNow = hourFloat(now);
+  const idx = Math.min(Math.max(Math.floor(now.getHours()),0), weather.temperature_2m.length-1);
+
+  const temp  = weather.temperature_2m[idx];
+  const hum   = weather.relative_humidity_2m[idx];
+  const cloud = weather.cloudcover_mid[idx];
+
+  // Sun position & factors
+  const { altDeg, aziDeg, sunFactor } = sunParams(now);
+
+  // Cloud factor (0..1), makin besar awan makin kecil output
+  const cloudFactor = 1 - (cloud/100) * CLOUD_LOSS;
+  const effectiveSun = Math.max(0, sunFactor) * Math.max(0, cloudFactor);
+
+  // Daya panel (W)
+  let solarWatt = PANEL_WP * MPPT_EFF * effectiveSun;
+
+  // Tegangan baterai sederhana: naik halus dengan SOC
+  let volt = 12.0 + 0.8 * (batteryPct/100); // ~12.0–12.8V
+  // Batas minimal tegangan
+  if(volt < 11.8) volt = 11.8;
+
+  // Arus masuk (A)
+  let amp = (volt>0) ? (solarWatt / volt) : 0;
+
+  // Jam siang untuk charging (boleh juga override oleh sunFactor > 0 agar lebih fisik)
+  const isDayWindow = (hNow >= CHARGE_START_H && hNow <= CHARGE_END_H);
+  const isSunUp = (altDeg > 0.0);
+
+  // Integrasi energi per detik → ∆% SOC
+  const dtHour = 1/3600; // 1 detik
+  if(isDayWindow && isSunUp){
+    if(batteryPct >= 100){
+      // Trickle mode: 0.2–0.5A
+      amp = 0.2 + Math.random()*0.3;
+      solarWatt = amp * volt;
+      // Tidak menambah SOC (anggap BMS stop charge), hanya tampilkan arus kecil
+    }else{
+      const dPct = (solarWatt / BATTERY_CAPACITY_WH) * 100 * dtHour;
+      batteryPct = Math.min(100, batteryPct + dPct);
+    }
+  }else{
+    // Malam: beban 18W
+    const dPct = (NIGHT_LOAD_W / BATTERY_CAPACITY_WH) * 100 * dtHour;
+    batteryPct = Math.max(0, batteryPct - dPct);
+    // Saat malam, output panel nol (override)
+    solarWatt = 0;
+    amp = 0;
+  }
+
+  // Render UI
+  renderTopStats({
+    temp, hum, cloud,
+    volt, amp,
+    sunAlt: altDeg, sunAzi: aziDeg, sunFac: effectiveSun
+  });
+
+  // Persist SOC
+  localStorage.setItem('batteryPct', batteryPct);
+
+  // Log per ganti jam (sekali tiap jam)
+  const currentHour = now.getHours();
+  if(currentHour !== lastHourLogged){
+    lastHourLogged = currentHour;
+    history.push({
+      h: currentHour,
+      battery: batteryPct,
+      watt: solarWatt,
+      sunAlt: altDeg,
+      cloud: cloud
+    });
+    if(history.length > 48) history.shift(); // simpan 2 hari
+    localStorage.setItem('history', JSON.stringify(history));
+    updateHistoryTable();
+    updateChart();
+  }
+}
+
+/* -------------------- Bootstrap -------------------- */
+initializeChart();
+updateHistoryTable();
+updateChart();
+fetchWeather().then(()=> {
+  secondTick();
+  // 1 detik untuk UI+kalkulasi
+  setInterval(secondTick, 1000);
+});
+</script>
+</body>
+</html>
